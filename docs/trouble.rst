@@ -2,90 +2,59 @@
    Troubleshooting
 =====================
 
-Install Issues
---------------
-
-Pyaudio:
-
-.. code:: console
-
-    $ conda install -c anaconda pyaudio
-
 Windows
 -------
 
-.. _win-alt-install:
-
-Alternative Install Instructions:
-+++++++++++++++++++++++++++++++++
-
-.. code:: doscon
-
-    > conda create -n ledfx-git python=3.6
-    > conda activate ledfx-git
-    > conda config --add channels conda-forge
-    > conda install pywin32 portaudio aubio
-    > conda install -c anaconda pyaudio
-    > cd %HOMEPATH%
-    > mkdir ledfx
-    > git clone https://github.com/ahodges9/LedFx.git ledfx
-    > cd ledfx
-    > pip install -r requirements.txt
-    > python setup.py install
-    > ledfx --open-ui
-
 .. _win-dev-install:
 
-No Conda Installation (good for devs) (requires Visual Studio Build Tools):
+Developer Setup Installation - Python venv
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
- - Install python 3.7.9
- - Install visual studio build tools for win10
+  - Install Python 3.9
+  - Install Git.
+  - Using "Build Tools for Visual Studio 2019" installer:
     - https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2019
-    - "visual c++ build tools"
-    - default install options
- - Reboot
- - Open start menu -> x86 native build tools command prompt for VS 2019
-
-.. code:: doscon
-
-    > python -m venv C:/ledfx
-    > C:\ledfx\Scripts\activate.bat
-    > pip install pipwin
-    > pipwin install pyaudio
-
-download ledfx (dev) from github
-put this wherever you want
-cd to this directory
-
-.. code:: doscon
-
-    > python setup.py develop
-    > ledfx
+    - You require the mandatory selected build tools, and the following optional tools;
+        - Windows 10 SDK (or your equivalent Windows Version)
+        - C++ CMAKE tools for Windows
+        - MSVC v142 (or above) - VS 2019 C++ x64/x86 build tools
+    - Default install options are appropriate.
+  - Reboot
 
 
-Dev Branch Install:
-+++++++++++++++++++
+.. code:: console
 
-.. code:: doscon
+    $ python -m venv C:\ledfx
+    $ cd C:\ledfx
+    $ .\Scripts\activate.bat
+    $ pip install pipwin
+    $ pipwin refresh
+    $ pipwin install pyaudio
+    $ pipwin install pywin32
+    $ python .\Scripts\pywin32_postinstall.py -install
+    $ pip install numpy
+    $ pip install "chardet<4.0"
+    $ pip install --upgrade git+https://github.com/Digital-Sapphire/PyUpdater.git@master
+    $ git clone -b dev https://github.com/LedFx/LedFx .\ledfx-git
+    $ cd .\ledfx-git
+    $ python setup.py develop
+    $ ledfx --open-ui
 
-    > conda create -n ledfxdevelopement-git
-      y
-    > conda activate ledfxdevelopement-git
-    > conda config --add channels conda-forge
-    > conda install pywin32 portaudio aubio
-      y
-    > cd %HOMEPATH%
-    > mkdir ledfx_dev_branch
-    > git clone https://github.com/ahodges9/LedFx.git -b dev ledfx_dev_branch
-    > cd ledfx_dev_branch
-    > pip install -r requirements.txt
-    > python setup.py install
-    > python setup.py develop
-    > yarn install
-    > npm run build
-    > ledfx --open-ui
+**1.** To develop, open up a terminal and activate the ledfx virtual environment
+
+.. code:: console
+
+    $ C:\ledfx\Scripts\activate.bat
+
+**2.** Make changes to LedFx's files in C:/ledfx/ledfx-git. Your changed files will be run when you run LedFx
+
+.. code:: console
+
+    $ ledfx --open-ui
+
+You can keep the ledfx virtual environment open and keep making changes then running ledfx.
+No need to reactivate the virtual environment between changes.
 
 Firmware Issues
 ---------------
@@ -106,7 +75,7 @@ WLED
     - Try 1 WLED device to start and work your way up to see where the problem lies, whilst monitoring your computer performance usage.
 
   - Determine if it’s a networking problem:
-    Try pinging the device, LedFx is extremely latency sensitive.
+    Try pinging the device - any large variances in ping will cause issues - LedFx is extremely latency sensitive.
     Command prompt ping the IP address of the WLED device. For example: ping 192.168.1.101
 
 ESPixelStick
@@ -123,7 +92,7 @@ LedFx Configuration File
 
 Did you try host: 0.0.0.0 or host: your-ipv4 (i.e.: 192.168.1.10)? The 127 is your localhost internal network and
 running anything on that subnet will only be available from that device. Putting it on 0.0.0.0 or your host's
-LAN IP opens up the port, 8383 in your case, to other devices on your LAN from your host's IP.
+LAN IP opens up the port, 8888 in our case, to other devices on your LAN from your host's IP.
 
 Speaker Sound
 -------------
@@ -160,13 +129,17 @@ Networking Improvements
 
 **DPC Latency**
 
-1. Disable WiFi Sleep Mode on WLED.
-2. Reduce FPS to 30, and set 'Force Refresh' to true.
+LedFx is *extremely* latency sensitive and will expose inherit weaknesses in WiFi.
+To minimize this, we reccomend:
+
+1. Disabling WiFi Sleep Mode on WLED.
+2. Minimize WiFi activity on your network - using ethernet where possible.
+3. Ensure router appropriate for number of devices and amount of traffic.
+4. Attempting to ensure your WiFi access point is located in an appropriate area, and is using an appropriate WiFi channel.
 
 **Access via LAN**
 
-I added host: 0.0.0.0 to the LedFx config and now it works fine!
-https://github.com/ahodges9/LedFx/issues/62
+All current builds should be able to be accessed from LAN - please ensure that you allow traffic from port 8888 from the host machine.
 
 Need more help?
 ---------------

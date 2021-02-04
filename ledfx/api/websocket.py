@@ -10,7 +10,7 @@ from ledfx.api import RestEndpoint
 from ledfx.events import Event
 
 _LOGGER = logging.getLogger(__name__)
-MAX_PENDING_MESSAGES = 256
+MAX_PENDING_MESSAGES = 1024
 
 BASE_MESSAGE_SCHEMA = vol.Schema(
     {
@@ -40,7 +40,12 @@ class WebsocketEndpoint(RestEndpoint):
     ENDPOINT_PATH = "/api/websocket"
 
     async def get(self, request) -> web.Response:
-        return await WebsocketConnection(self._ledfx).handle(request)
+        try:
+            return await WebsocketConnection(self._ledfx).handle(request)
+        except ConnectionResetError:
+            _LOGGER.debug(
+                "Connection Reset Error on Websocket Connection - retrying."
+            )
 
 
 class WebsocketConnection:

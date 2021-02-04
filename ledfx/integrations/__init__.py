@@ -1,13 +1,12 @@
-from ledfx.utils import BaseRegistry, RegistryLoader, async_fire_and_forget
-
-# from ledfx.config import save_config
-from ledfx.events import Event
-
 # from abc import abstractmethod
 # import voluptuous as vol
 # import numpy as np
 # import requests
 import logging
+
+# from ledfx.config import save_config
+from ledfx.events import Event
+from ledfx.utils import BaseRegistry, RegistryLoader, async_fire_and_forget
 
 # import asyncio
 
@@ -40,8 +39,7 @@ class Integration(BaseRegistry):
         )
         self._active = True
         self._status = 3
-        await self.connect()
-        self._status = 1
+        async_fire_and_forget(self.connect(), self._ledfx.loop)
 
     async def deactivate(self):
         _LOGGER.info(
@@ -49,8 +47,7 @@ class Integration(BaseRegistry):
         )
         self._active = False
         self._status = 2
-        await self.disconnect()
-        self._status = 0
+        async_fire_and_forget(self.disconnect(), self._ledfx.loop)
 
     async def reconnect(self):
         _LOGGER.info(
@@ -60,26 +57,31 @@ class Integration(BaseRegistry):
         await self.disconnect()
         self._status = 3
         await self.connect()
-        self._status = 1
 
-    async def connect(self):
+    async def connect(self, msg=None):
         """
         Establish a connection with the service.
-        This abstract method must be overwritten by the integration implementation.
+        This method must be overwritten by the integration implementation.
+        Be sure to end this function with await super().connect()
         """
-        pass
+        self._status = 1
+        if msg:
+            _LOGGER.info(msg)
 
-    async def disconnect(self):
+    async def disconnect(self, msg=None):
         """
         Disconnect from the service.
-        This abstract method must be overwritten by the integration implementation.
+        This method must be overwritten by the integration implementation.
+        Be sure to end this function with await super().disconnect()
         """
-        pass
+        self._status = 0
+        if msg:
+            _LOGGER.info(msg)
 
     def on_shutdown(self):
         """
         Integrations should reimplement this if there's anything they need to do on shutdown to close cleanly.
-        This abstract method must be overwritten by the integration implementation.
+        This method must be overwritten by the integration implementation.
         """
         pass
 

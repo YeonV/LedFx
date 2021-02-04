@@ -1,18 +1,21 @@
 import asyncio
-
 import concurrent.futures
 import importlib
 import inspect
+import ipaddress
 import logging
 import os
 import pkgutil
 import re
+import socket
 import sys
 from abc import ABC
 
 # from asyncio import coroutines, ensure_future
 from subprocess import PIPE, Popen
 
+import numpy as np
+import requests
 import voluptuous as vol
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,6 +112,205 @@ def async_callback(loop, callback, *args):
     return future
 
 
+def wled_identifier(device_ip, device_name):
+
+    """
+        Uses a JSON API call to determine if the device is WLED or WLED compatible
+        Specifically searches for "WLED" in the brand json - currently all major
+        branches/forks of WLED contain WLED in the branch data.
+
+    Args:
+        device_ip (string): The device IP to be queried
+        device_name (string): The name of the device
+    Returns:
+        boolean
+    """
+    try:
+        device_info = requests.get(
+            f"http://{device_ip}/json/info", timeout=0.25
+        )
+        if device_info.ok:
+            device_json = device_info.json()
+
+            if device_json["brand"] in "WLED":
+                _LOGGER.info(
+                    f"{device_name} is WLED compatible: {device_json['brand']}"
+                )
+                return True
+            else:
+                _LOGGER.info(
+                    f"{device_name} is NOT WLED compatible: {device_json['brand']}"
+                )
+                return False
+        else:
+            _LOGGER.warning(
+                f"WLED API Error on {device_name}: {device_info.status_code}"
+            )
+            return False
+    except requests.exceptions.RequestException:
+        _LOGGER.info(
+            f"WLED Identifier can't connect to {device_name}. Likely not WLED."
+        )
+        return False
+
+
+def wled_power_state(device_ip, device_name):
+    """
+        Uses a JSON API call to determine the WLED device power state (on/off)
+
+    Args:
+        device_ip (string): The device IP to be queried
+        device_name (string): The name of the device
+    Returns:
+        boolean: True is "On", False is "Off"
+    """
+    try:
+        device_state = requests.get(
+            f"http://{device_ip}/json/state", timeout=0.25
+        )
+        if device_state.ok:
+            device_json = device_state.json()
+            _LOGGER.info(f"{device_name} powered on: {device_json['on']}")
+            if device_json["on"] is True:
+                return True
+            else:
+                return False
+        else:
+            _LOGGER.warning(
+                f"WLED API Error on {device_name}: {device_state.status_code}"
+            )
+            return False
+    except requests.exceptions.RequestException as CapturedError:
+        _LOGGER.warning(
+            f"Error Obtaining WLED Power State for {device_name}: {CapturedError}"
+        )
+        return False
+
+
+def turn_wled_on(device_ip, device_name):
+    """
+        Uses a HTTP post call to turn a WLED compatible device on
+
+    Args:
+        device_ip (string): The device IP to be turned on
+        device_name (string): The name of the device
+    Returns:
+        boolean: Success or failure of API call
+    """
+    try:
+        turn_on = requests.post(f"http://{device_ip}/win&T=1", timeout=0.25)
+
+        if turn_on.ok:
+            _LOGGER.info(f"Turning WLED device {device_name} on.")
+            return True
+        else:
+            _LOGGER.warning(
+                f"WLED API Error on {device_name}: {turn_on.status_code}"
+            )
+            return False
+    except requests.exceptions.RequestException as CapturedError:
+        _LOGGER.warning(f"Error turning {device_name} on: {CapturedError}")
+
+
+def turn_wled_off(device_ip, device_name):
+    """
+        Uses a HTTP post call to turn a WLED compatible device off
+
+    Args:
+        device_ip (string): The device IP to be turned off
+        device_name (string): The name of the device
+    Returns:
+        boolean: Success or failure of API call
+    """
+    try:
+        turn_off = requests.post(f"http://{device_ip}/win&T=0", timeout=0.25)
+
+        if turn_off.ok:
+            _LOGGER.info(f"Turning WLED device {device_name} off.")
+            return True
+        else:
+            _LOGGER.warning(
+                f"WLED API Error on {device_name}: {turn_off.status_code}"
+            )
+            return False
+    except requests.exceptions.RequestException as CapturedError:
+        _LOGGER.warning(f"Error turning {device_name} off: {CapturedError}")
+
+
+def adjust_wled_brightness(device_ip, device_name, brightness):
+    """
+        Uses a HTTP post call to adjust a WLED compatible device's
+        brightness
+
+
+    Args:
+        device_ip (string): The device IP to adjust brightness
+        device_name (string): The name of the device
+        brightness (int): The brightness value between 0-255
+
+    Returns:
+        boolean: Success or failure of API call
+    """
+    validated_brightness = np.clip(brightness, 0, 255)
+
+    try:
+        adjust_brightness = requests.post(
+            f"http://{device_ip}/win&A={validated_brightness}", timeout=0.25
+        )
+
+        if adjust_brightness.ok:
+            _LOGGER.info(
+                f"Adjusting {device_name} brightness to: {validated_brightness}."
+            )
+            return True
+        else:
+            _LOGGER.warning(
+                f"WLED API Error while trying to adjust brightness on {device_name}."
+            )
+            return False
+    except requests.exceptions.RequestException as CapturedError:
+        _LOGGER.warning(
+            f"Error Adjusting {device_name} brightness: {CapturedError}"
+        )
+
+
+def resolve_destination(destination):
+    """Uses a socket to attempt domain lookup
+
+    Args:
+        destination (string): The domain name to be resolved.
+
+    Returns:
+        On success: string containing the resolved IP address.
+        On failure: boolean false.
+    """
+    try:
+        ipaddress.ip_address(destination)
+        return destination
+    except ValueError:
+
+        cleaned_dest = destination.rstrip(".")
+
+        try:
+            return socket.gethostbyname(cleaned_dest)
+        except socket.gaierror:
+
+            _LOGGER.warning(f"Failed resolving {cleaned_dest}.")
+
+        return False
+
+
+def currently_frozen():
+    """Checks to see if running in a frozen environment such as pyinstaller or pyupdater package
+    Args:
+        Nil
+
+    Returns:
+        boolean
+    """
+    return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+
+
 def generate_id(name):
     """Converts a name to a id"""
     part1 = re.sub("[^a-zA-Z0-9]", " ", name).lower()
@@ -146,6 +348,15 @@ def getattr_explicit(cls, attr, *default):
     raise AttributeError(
         "type object '{}' has no attribute '{}'.".format(cls.__name__, attr)
     )
+
+
+class RollingQueueHandler(logging.handlers.QueueHandler):
+    def enqueue(self, record):
+        try:
+            self.queue.put_nowait(record)
+        except asyncio.QueueFull:
+            self.queue.get_nowait()
+            self.enqueue(record)
 
 
 class BaseRegistry(ABC):
@@ -235,13 +446,8 @@ class RegistryLoader(object):
         # within the package changes.
         # Check ledfx is not running as a single exe built using pyinstaller
         # (sys frozen flag).
-        if (
-            ledfx.dev_enabled()
-            and import_or_install("watchdog")
-            and not getattr(sys, "frozen", False)
-            and hasattr(sys, "_MEIPASS")
-        ):
-
+        if ledfx.dev_enabled() and not currently_frozen():
+            import_or_install("watchdog")
             watchdog_events = import_or_install("watchdog.events")
             watchdog_observers = import_or_install("watchdog.observers")
 

@@ -1,9 +1,5 @@
 .. include:: ../README.rst
 
-.. .. include:: quickstart.rst
-
-.. .. include:: contents.rst
-
 .. toctree::
    :maxdepth: 2
    :caption: Installation & Development
@@ -16,6 +12,7 @@
    :caption: Configuration
 
    configuring
+   directing_audio
 
 .. toctree::
    :maxdepth: 2

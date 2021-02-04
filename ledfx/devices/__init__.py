@@ -1,16 +1,7 @@
-from ledfx.utils import BaseRegistry, RegistryLoader, generate_id
-from ledfx.config import save_config
-from ledfx.events import (
-    DeviceUpdateEvent,
-    EffectSetEvent,
-    EffectClearedEvent,
-    Event,
-)
-
 import asyncio
 import logging
 import socket
-
+import time
 from abc import abstractmethod
 
 import numpy as np
@@ -19,7 +10,12 @@ import voluptuous as vol
 import zeroconf
 
 from ledfx.config import save_config
-from ledfx.events import DeviceUpdateEvent, Event
+from ledfx.events import (
+    DeviceUpdateEvent,
+    EffectClearedEvent,
+    EffectSetEvent,
+    Event,
+)
 from ledfx.utils import BaseRegistry, RegistryLoader, generate_id
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +34,11 @@ class Device(BaseRegistry):
                 description="Max brightness for the device",
                 default=1.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+            vol.Optional(
+                "icon_name",
+                description="https://material-ui.com/components/material-icons/",
+                default="SettingsInputComponent",
+            ): str,
             vol.Optional(
                 "center_offset",
                 description="Number of pixels from the perceived center of the device",
@@ -154,11 +155,18 @@ class Device(BaseRegistry):
     def thread_function(self):
         # TODO: Evaluate switching over to asyncio with UV loop optimization
         # instead of spinning a separate thread.
-        sleep_interval = 1 / self._config["refresh_rate"]
-
         if self._active:
-            self._ledfx.loop.call_later(sleep_interval, self.thread_function)
+            sleep_interval = 1 / self._config["refresh_rate"]
+            start_time = time.time()
+
             self.process_active_effect()
+
+            # Calculate the time to sleep accounting for potential heavy
+            # frame assembly operations
+            time_to_sleep = sleep_interval - (time.time() - start_time)
+            # print(1/time_to_sleep, end="\r") prints current fps
+
+            self._ledfx.loop.call_later(time_to_sleep, self.thread_function)
 
         # while self._active:
         #     start_time = time.time()
@@ -179,6 +187,13 @@ class Device(BaseRegistry):
         merging multiple segments segments and alpha blending channels
         """
         frame = None
+
+        # quick bugfix.
+        # this all needs to be reworked for effects like real_strobe
+        # where the effect drives the device, not vice-versa
+        if self._active_effect is None:
+            return None
+
         if self._active_effect._dirty:
             # Get and process active effect frame
             pixels = self._active_effect.get_pixels()
@@ -277,6 +292,7 @@ class Devices(RegistryLoader):
             self.clear_all_effects()
 
         self._ledfx.events.add_listener(cleanup_effects, Event.LEDFX_SHUTDOWN)
+        self._zeroconf = zeroconf.Zeroconf()
 
     def create_from_config(self, config):
         for device in config:
@@ -316,19 +332,18 @@ class Devices(RegistryLoader):
         # Scan the LAN network that match WLED using zeroconf - Multicast DNS
         # Service Discovery Library
         _LOGGER.info("Scanning for WLED devices...")
-        zeroconf_obj = zeroconf.Zeroconf()
-        listener = MyListener(self._ledfx)
-        browser = zeroconf.ServiceBrowser(
-            zeroconf_obj, "_wled._tcp.local.", listener
+        wled_listener = WLEDListener(self._ledfx)
+        wledbrowser = self._zeroconf.add_service_listener(
+            "_wled._tcp.local.", wled_listener
         )
         try:
             await asyncio.sleep(10)
         finally:
             _LOGGER.info("Scan Finished")
-            zeroconf_obj.close()
+            self._zeroconf.remove_service_listener(wled_listener)
 
 
-class MyListener:
+class WLEDListener(zeroconf.ServiceBrowser):
     def __init__(self, _ledfx):
         self._ledfx = _ledfx
 
@@ -337,10 +352,13 @@ class MyListener:
 
     def add_service(self, zeroconf_obj, type, name):
 
+        _LOGGER.info("Found Device!")
+
         info = zeroconf_obj.get_service_info(type, name)
 
         if info:
             address = socket.inet_ntoa(info.addresses[0])
+            hostname = str(info.server)
             url = f"http://{address}/json/info"
             # For each WLED device found, based on the WLED IPv4 address, do a
             # GET requests
@@ -369,12 +387,17 @@ class MyListener:
                 "universe_size": unisize,
                 "name": wledname,
                 "pixel_count": wledcount,
-                "ip_address": address,
+                "ip_address": hostname.rstrip("."),
             }
 
-            # Check this device doesn't share IP with any other device
+            # Check this device doesn't share IP, name or hostname with any current saved device
             for device in self._ledfx.devices.values():
-                if device.config["ip_address"] == address:
+                if (
+                    device.config["ip_address"] == hostname.rstrip(".")
+                    or device.config["ip_address"] == hostname
+                    or device.config["name"] == wledname
+                    or device.config["ip_address"] == address
+                ):
                     return
 
             # Create the device

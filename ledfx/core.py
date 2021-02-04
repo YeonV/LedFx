@@ -1,25 +1,24 @@
 import asyncio
 import logging
 import sys
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 
 from ledfx.config import load_config, load_default_presets, save_config
 from ledfx.devices import Devices
 from ledfx.effects import Effects
-
-from ledfx.integrations import Integrations
-from ledfx.config import (
-    load_config,
-    save_config,
-    load_default_presets,
-)
 from ledfx.events import Events, LedFxShutdownEvent
-
 from ledfx.http_manager import HttpServer
-from ledfx.utils import async_fire_and_forget
-
+from ledfx.integrations import Integrations
+from ledfx.utils import (
+    RollingQueueHandler,
+    async_fire_and_forget,
+    currently_frozen,
+)
 
 _LOGGER = logging.getLogger(__name__)
+if currently_frozen():
+    warnings.filterwarnings("ignore")
 
 
 class LedFxCore(object):
@@ -34,12 +33,12 @@ class LedFxCore(object):
             self.loop = asyncio.ProactorEventLoop()
         else:
             self.loop = asyncio.get_event_loop()
-        executor_opts = {"max_workers": self.config.get("max_workers")}
 
-        self.executor = ThreadPoolExecutor(**executor_opts)
+        self.executor = ThreadPoolExecutor()
         self.loop.set_default_executor(self.executor)
         self.loop.set_exception_handler(self.loop_exception_handler)
 
+        self.setup_logqueue()
         self.events = Events(self)
         self.http = HttpServer(ledfx=self, host=host, port=port)
         self.exit_code = None
@@ -61,6 +60,16 @@ class LedFxCore(object):
             "Exception in core event loop: {}".format(context["message"]),
             **kwargs,
         )
+
+    def setup_logqueue(self):
+        def log_filter(record):
+            return (record.name != "ledfx.api.log") and (record.levelno >= 20)
+
+        self.logqueue = asyncio.Queue(maxsize=100, loop=self.loop)
+        logqueue_handler = RollingQueueHandler(self.logqueue)
+        logqueue_handler.addFilter(log_filter)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(logqueue_handler)
 
     async def flush_loop(self):
         await asyncio.sleep(0, loop=self.loop)
@@ -112,7 +121,9 @@ class LedFxCore(object):
             _LOGGER.info("No devices saved in config.")
             async_fire_and_forget(self.devices.find_wled_devices(), self.loop)
 
-        await self.integrations.activate_integrations()
+        async_fire_and_forget(
+            self.integrations.activate_integrations(), self.loop
+        )
 
         if open_ui:
             import webbrowser
@@ -124,8 +135,8 @@ class LedFxCore(object):
                 # If the user has specified an adaptor, launch its address
                 url = self.http.base_url
             try:
-                webbrowser.open(url)
-            except FileNotFoundError:
+                webbrowser.get().open(url)
+            except webbrowser.Error:
                 _LOGGER.warning(
                     f"Failed to open default web browser. To access LedFx's web ui, open {url} in your browser. To prevent this error in future, configure a default browser for your system."
                 )
